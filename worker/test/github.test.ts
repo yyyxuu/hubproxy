@@ -142,8 +142,8 @@ describe('handleGitHubProxy', () => {
     )
     expect(response.status).toBe(200)
     expect(calls[0].url).toBe('https://github.com/owner/repo/releases/download/v1/app.tar.gz')
-    // 服务端跟随重定向
-    expect(calls[0].init?.redirect).toBe('follow')
+    // 手动重定向：非 GitHub 链接由服务端跟随
+    expect(calls[0].init?.redirect).toBe('manual')
     await expect(response.text()).resolves.toBe(body)
     expect(response.headers.get('Content-Type')).toBe('application/octet-stream')
     expect(response.headers.get('Content-Length')).toBe(String(body.length))
@@ -217,6 +217,112 @@ describe('handleGitHubProxy', () => {
     )
     expect(response.status).toBe(302)
     expect(response.headers.get('Location')).toBe('/https://github.com/other/repo/raw/main/x')
+  })
+
+  it('非 GitHub Location → 服务端跟随，客户端看到最终 200 与 CDN body', async () => {
+    const initialUrl = 'https://github.com/owner/repo/releases/download/v1/file'
+    const cdnUrl = 'https://objects.githubusercontent.com/owner/repo/file'
+    const cdnBody = 'cdn-binary-data'
+    const { calls, fetchFn } = makeGithubFetch((url) => {
+      if (url === initialUrl) {
+        return new Response(null, { status: 302, headers: { Location: cdnUrl } })
+      }
+      if (url === cdnUrl) {
+        return new Response(cdnBody, {
+          status: 200,
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(cdnBody.length) },
+        })
+      }
+      return null
+    })
+    const response = await handleGitHubProxy(
+      new Request(`https://hub.example.com/${initialUrl}`),
+      makeEnv(),
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    // mock 收到两次请求：先原始 URL，再跟随到 CDN URL
+    expect(calls).toHaveLength(2)
+    expect(calls[0].url).toBe(initialUrl)
+    expect(calls[1].url).toBe(cdnUrl)
+    await expect(response.text()).resolves.toBe(cdnBody)
+    expect(response.headers.get('Content-Type')).toBe('application/octet-stream')
+    expect(response.headers.get('Content-Length')).toBe(String(cdnBody.length))
+  })
+
+  it('.sh URL 上游 302 到非 .sh 二进制 → 最终响应原样透传、不做改写', async () => {
+    const shUrl = 'https://github.com/owner/repo/raw/main/install.sh'
+    const binUrl = 'https://objects.githubusercontent.com/owner/repo/install.bin'
+    const binBody = new Uint8Array([0x00, 0x01, 0x02, 0xff])
+    const { calls, fetchFn } = makeGithubFetch((url) => {
+      if (url === shUrl) {
+        return new Response(null, { status: 302, headers: { Location: binUrl } })
+      }
+      if (url === binUrl) {
+        return new Response(binBody, {
+          status: 200,
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(binBody.length) },
+        })
+      }
+      return null
+    })
+    const response = await handleGitHubProxy(
+      new Request(`https://hub.example.com/${shUrl}`),
+      makeEnv(),
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    expect(calls).toHaveLength(2)
+    expect(calls[1].url).toBe(binUrl)
+    // 脚本分类按最终 URL（binUrl 非 .sh）→ 进入透传，字节与 Content-Type 原样保留
+    expect(Buffer.from(await response.arrayBuffer()).equals(Buffer.from(binBody))).toBe(true)
+    expect(response.headers.get('Content-Type')).toBe('application/octet-stream')
+    expect(response.headers.get('Content-Length')).toBe(String(binBody.length))
+  })
+
+  it('重定向循环 → 返回 508，不挂起', async () => {
+    const loopUrl = 'https://example.com/loop'
+    const { calls, fetchFn } = makeGithubFetch(
+      () => new Response(null, { status: 302, headers: { Location: loopUrl } }),
+    )
+    const response = await handleGitHubProxy(
+      new Request('https://hub.example.com/https://github.com/owner/repo/releases/download/v1/file'),
+      makeEnv(),
+      fetchFn,
+    )
+    expect(response.status).toBe(508)
+    // 首次请求 + MAX_REDIRECTS(10) 次跟随后触发上限，共 11 次
+    expect(calls).toHaveLength(11)
+  })
+
+  it('Ruling E：br 编码的 .sh 原样透传、不做改写/解压', async () => {
+    const body = 'echo https://github.com/foo/bar/raw/main/a.sh'
+    const { fetchFn } = makeGithubFetch(
+      () => new Response(body, { status: 200, headers: { 'Content-Encoding': 'br', 'Content-Type': 'text/plain' } }),
+    )
+    const response = await handleGitHubProxy(
+      new Request('https://hub.example.com/https://github.com/owner/repo/raw/main/install.sh'),
+      makeEnv(),
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    // 保持 br 编码原样透传，body 未被改写（仍为原始 GitHub URL）
+    expect(response.headers.get('Content-Encoding')).toBe('br')
+    const text = await response.text()
+    expect(text).toContain('https://github.com/foo/bar/raw/main/a.sh')
+    expect(text).not.toContain('https://hub.example.com/https://github.com/foo/bar/raw/main/a.sh')
+  })
+
+  it('Ruling E：.ps1 与 .sh 同样被改写', async () => {
+    const original = 'Write-Host https://github.com/foo/bar/raw/main/a.ps1'
+    const { fetchFn } = makeGithubFetch(() => new Response(original, { status: 200 }))
+    const response = await handleGitHubProxy(
+      new Request('https://hub.example.com/https://github.com/owner/repo/raw/main/install.ps1'),
+      makeEnv(),
+      fetchFn,
+    )
+    const text = await response.text()
+    expect(text).toContain('https://hub.example.com/https://github.com/foo/bar/raw/main/a.ps1')
   })
 
   it('不支持的主机（example.com）→ 403，且不访问上游', async () => {

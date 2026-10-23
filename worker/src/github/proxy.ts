@@ -101,6 +101,14 @@ function isScriptUrl(url: string): boolean {
   return lower.endsWith('.sh') || lower.endsWith('.ps1')
 }
 
+// 服务端跟随重定向的最大次数（对齐上游 proxyGitHubWithRedirect 的 maxRedirects，改用 10）
+const MAX_REDIRECTS = 10
+
+/** 是否为带 Location 的 3xx 重定向响应 */
+function isRedirect(resp: Response): boolean {
+  return resp.status >= 300 && resp.status < 400 && resp.headers.get('Location') !== null
+}
+
 /**
  * GitHub / HF 代理入口（catch-all）：路径即目标 URL。
  *
@@ -109,13 +117,13 @@ function isScriptUrl(url: string): boolean {
  * 2. 自动补 https://（处理 http:/、https:/ 畸形前缀与双斜杠）
  * 3. checkGitHubURL 不匹配 → 403；匹配则 checkRepoAccess（owner/name 去 .git）不过 → 403
  * 4. blob → raw 改写
- * 5. api.github.com 路径透传 Authorization 头，其他路径剥离
- * 6. 转发上游（redirect: 'follow' 服务端跟随非 GitHub 重定向）
- * 7. GET 且上游为 HTML/XML → 403；Content-Length 超 cfg.maxFileSize → 413
- * 8. 清理安全策略头；Location 为 GitHub 链接 → 改写为 /{location} 的 3xx
- * 9. .sh/.ps1：gzip 先解压、再改写 URL，响应去掉 Content-Encoding/Content-Length；
- *    br/deflate 等其他编码不做改写
- * 10. clone（info/refs、git-*）与其余二进制：原样流式透传（encodeBody: 'manual'）
+ * 5. api.github.com 路径透传 Authorization 头，其他路径剥离；redirect: 'manual'
+ * 6. 手动处理重定向：Location 为 GitHub/HF 链接 → 回 3xx 并把 Location 改写为 /{location}
+ *    （客户端经本 Worker 再访问）；否则服务端跟随，上限 MAX_REDIRECTS 超出 → 508
+ * 7. 对最终响应：GET 且上游为 HTML/XML → 403；Content-Length 超 cfg.maxFileSize → 413
+ * 8. .sh/.ps1 按最终 URL（跟随后的 currentUrl）判定：gzip 先解压（失败 → 502）、再改写 URL，
+ *    响应去掉 Content-Encoding/Content-Length；br/deflate 等其他编码不做改写
+ * 9. clone（info/refs、git-*）与其余二进制：原样流式透传（encodeBody: 'manual'），绝不改写 body
  */
 export async function handleGitHubProxy(request: Request, env: Env, fetchFn: FetchLike): Promise<Response> {
   const cfg = loadConfig(env)
@@ -156,15 +164,38 @@ export async function handleGitHubProxy(request: Request, env: Env, fetchFn: Fet
   if (!upstreamUrl.startsWith('https://api.github.com/')) {
     headers.delete('Authorization')
   }
-  const init: RequestInit = { method: request.method, headers, redirect: 'follow' }
+  const init: RequestInit = { method: request.method, headers, redirect: 'manual' }
   if (request.body !== null) {
     init.body = request.body
   }
 
-  // 6. 转发上游
-  const upstream = await fetchFn(upstreamUrl, init)
+  // 6. 手动处理重定向：GitHub/HF Location 回 3xx 经本 Worker 再访问；否则服务端跟随
+  let currentUrl = upstreamUrl
+  let redirectCount = 0
+  let upstream = await fetchFn(currentUrl, init)
+  while (isRedirect(upstream)) {
+    const location = upstream.headers.get('Location')!
+    if (checkGitHubURL(location) !== null) {
+      // Location 指向受支持链接：改写为 /{location} 的 3xx 返回客户端（不做 body 改写）
+      const redirectHeaders = passthroughHeaders(upstream.headers)
+      cleanSecurityHeaders(redirectHeaders)
+      redirectHeaders.set('Location', '/' + location)
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: redirectHeaders,
+        encodeBody: 'manual',
+      })
+    }
+    // 非 GitHub/HF 链接 → 服务端跟随（相对 Location 基于当前 URL 解析）
+    redirectCount++
+    if (redirectCount > MAX_REDIRECTS) {
+      return new Response('重定向次数过多，可能存在循环重定向', { status: 508 })
+    }
+    currentUrl = new URL(location, currentUrl).toString()
+    upstream = await fetchFn(currentUrl, init)
+  }
 
-  // 7. GET 且上游为 HTML/XML 类内容 → 403（避免把网页当代理内容透传）
+  // 7. 最终响应：GET 且上游为 HTML/XML 类内容 → 403（避免把网页当代理内容透传）
   if (request.method === 'GET' && isBlockedHtml(upstream.headers.get('Content-Type'))) {
     return new Response('forbidden', { status: 403 })
   }
@@ -175,28 +206,19 @@ export async function handleGitHubProxy(request: Request, env: Env, fetchFn: Fet
     return new Response('too large', { status: 413 })
   }
 
-  // 9. 清理安全策略头，并处理重定向
-  const responseHeaders = passthroughHeaders(upstream.headers)
-  cleanSecurityHeaders(responseHeaders)
-  const location = responseHeaders.get('Location')
-  if (location !== null && checkGitHubURL(location) !== null) {
-    // Location 指向受支持的 GitHub/HF 链接：改写为经本 Worker 再访问的 /{location}
-    responseHeaders.set('Location', '/' + location)
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: responseHeaders,
-      encodeBody: 'manual',
-    })
-  }
-
-  // 10. .sh/.ps1：仅 gzip 或无编码时缓冲并改写 URL（Ruling E）
-  if (isScriptUrl(upstreamUrl)) {
+  // 9. .sh/.ps1 按最终 URL（跟随后的 currentUrl）判定改写（Ruling E）
+  if (isScriptUrl(currentUrl)) {
     const contentEncoding = upstream.headers.get('Content-Encoding')?.toLowerCase() ?? ''
     if (contentEncoding === 'gzip' || contentEncoding === '') {
       let bodyText: string
       if (contentEncoding === 'gzip' && upstream.body !== null) {
-        const decompressed = upstream.body.pipeThrough(new DecompressionStream('gzip'))
-        bodyText = await new Response(decompressed).text()
+        try {
+          const decompressed = upstream.body.pipeThrough(new DecompressionStream('gzip'))
+          bodyText = await new Response(decompressed).text()
+        } catch {
+          // 对齐上游 github.go：脚本处理失败 → 502
+          return new Response('脚本处理失败', { status: 502 })
+        }
       } else {
         bodyText = await upstream.text()
       }
@@ -214,7 +236,7 @@ export async function handleGitHubProxy(request: Request, env: Env, fetchFn: Fet
     // br/deflate 等其他编码：不做改写，落入下方原样透传
   }
 
-  // 11. clone（info/refs、git-*）与其余二进制：原样流式透传，绝不改写 body
+  // 10. clone（info/refs、git-*）与其余二进制：原样流式透传，绝不改写 body
   const passthrough = makePassthroughResponse(upstream, request.method === 'HEAD' ? null : upstream.body)
   cleanSecurityHeaders(passthrough.headers)
   return passthrough
