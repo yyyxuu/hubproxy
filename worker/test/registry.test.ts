@@ -46,6 +46,23 @@ describe('detectRegistry', () => {
   it('未命中配置时回退 docker hub（registry-1.docker.io），repo 原样', () => {
     expect(detectRegistry('library/nginx', cfg)).toEqual({ domain: 'registry-1.docker.io', repo: 'library/nginx' })
   })
+
+  it('映射存在但 enabled=false 时回退 docker hub，而非该域名（对齐 isRegistryEnabled 语义）', () => {
+    const { env } = makeEnv()
+    env.UPSTREAM_REGISTRIES = JSON.stringify({
+      'ghcr.io': {
+        upstream: 'ghcr.io',
+        authHost: 'https://ghcr.io/token',
+        authType: 'github',
+        enabled: false,
+      },
+    })
+    const disabledCfg = loadConfig(env)
+    expect(detectRegistry('ghcr.io/owner/app', disabledCfg)).toEqual({
+      domain: 'registry-1.docker.io',
+      repo: 'ghcr.io/owner/app',
+    })
+  })
 })
 
 describe('handleRegistryRequest', () => {
@@ -196,6 +213,27 @@ describe('handleRegistryRequest', () => {
       fetchFn,
     )
     expect(calls[0].url).toBe('https://ghcr.io/v2/owner/app/manifests/latest')
+    expect(response.status).toBe(200)
+  })
+
+  it('UPSTREAM_REGISTRIES 中 ghcr.io enabled=false 时回退默认 docker hub，而非 ghcr.io 上游', async () => {
+    const { env } = makeEnv()
+    env.UPSTREAM_REGISTRIES = JSON.stringify({
+      'ghcr.io': {
+        upstream: 'ghcr.io',
+        authHost: 'https://ghcr.io/token',
+        authType: 'github',
+        enabled: false,
+      },
+    })
+    const { calls, fetchFn } = makeRoutedFetch(() => new Response('{}', { status: 200 }))
+    const response = await handleRegistryRequest(
+      new Request('https://hub.example.com/v2/ghcr.io/owner/app/manifests/latest'),
+      env,
+      fetchFn,
+    )
+    // 首段不再被当作注册表前缀，整体作为 repoPath 走默认 docker hub 上游
+    expect(calls[0].url).toBe('https://registry-1.docker.io/v2/ghcr.io/owner/app/manifests/latest')
     expect(response.status).toBe(200)
   })
 

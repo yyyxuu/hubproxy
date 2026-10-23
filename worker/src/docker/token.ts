@@ -42,11 +42,12 @@ export async function handleTokenRequest(request: Request, env: Env, fetchFn: Fe
 
   const upstream = await fetchFn(new Request(upstreamUrl, { method: 'GET', headers }))
 
-  // 仅成功响应写缓存（缓存读取在缓存命中判定处另行处理）
+  // 仅成功响应写缓存（缓存读取在缓存命中判定处另行处理）。
+  // 缓存是尽力而为的附加功能：KV put 失败绝不能让上游 200 响应失效，静默忽略。
   if (upstream.status === 200) {
     const token = await extractToken(upstream)
     if (token !== null) {
-      await setCachedToken(env, service, scope, token, cfg.tokenCacheTTL)
+      await setCachedToken(env, service, scope, token, cfg.tokenCacheTTL).catch(() => {})
     }
   }
   return upstream

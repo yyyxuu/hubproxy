@@ -17,12 +17,12 @@ const CACHED_MANIFEST_CONTENT_TYPE = 'application/vnd.docker.distribution.manife
 
 /**
  * 识别 repo 所属的上游注册表：
- * repoPath 首段命中 cfg.upstreamRegistries 的域名（如 ghcr.io）→ 该域名为上游、repo 去掉首段；
- * 否则回退默认 registry-1.docker.io、repo 原样。
+ * repoPath 首段命中 cfg.upstreamRegistries 且该映射 enabled=true 的域名（如 ghcr.io）→ 该域名为上游、repo 去掉首段；
+ * 否则（未命中或 enabled=false）回退默认 registry-1.docker.io、repo 原样（对齐 Go 版 isRegistryEnabled 语义）。
  */
 export function detectRegistry(repoPath: string, cfg: AppConfig): { domain: string; repo: string } {
   const first = repoPath.split('/')[0]
-  if (first !== '' && cfg.upstreamRegistries[first] !== undefined) {
+  if (first !== '' && cfg.upstreamRegistries[first]?.enabled === true) {
     return { domain: first, repo: repoPath.slice(first.length + 1) }
   }
   return { domain: DEFAULT_DOMAIN, repo: repoPath }
@@ -120,12 +120,13 @@ async function handleManifest(
   }
   const upstream = await fetchFn(buildUpstreamRequest(request, upstreamUrl), { redirect: 'follow' })
   // 仅 200 且带 digest 时缓存；manifest 体积小允许缓冲，clone 读取不影响原 body 透传。
-  // HEAD 请求上游 body 为 null（fetch 规范），禁止写缓存，避免空 manifest 污染 KV
+  // HEAD 请求上游 body 为 null（fetch 规范），禁止写缓存，避免空 manifest 污染 KV。
+  // 缓存是尽力而为的附加功能：KV put 失败绝不能让上游 200 响应失效，静默忽略。
   if (upstream.status === 200 && request.method !== 'HEAD') {
     const digest = upstream.headers.get('Docker-Content-Digest')
     if (digest) {
       const body = await upstream.clone().text()
-      await setCachedManifest(env, cacheRepo, digest, body, cfg.manifestCacheTTL)
+      await setCachedManifest(env, cacheRepo, digest, body, cfg.manifestCacheTTL).catch(() => {})
     }
   }
   return passthroughResponse(upstream, upstream.body, baseUrl)
