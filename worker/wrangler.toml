@@ -1,0 +1,24 @@
+# HubProxy Cloudflare Worker 配置
+name = "hubproxy-worker"
+main = "src/index.ts"
+# Workers 平台兼容性日期
+compatibility_date = "2026-10-12"
+
+# KV 命名空间占位：id 留空，部署前先 `wrangler kv namespace create` 填入真实 id
+[[kv_namespaces]]
+binding = "TOKENS"
+id = ""
+
+[[kv_namespaces]]
+binding = "MANIFESTS"
+id = ""
+
+# [vars] 占位：以下配置项由 Task 8 填入默认值（均为可选字符串，未设置时使用代码内默认逻辑）
+# UPSTREAM_REGISTRIES = ""   # JSON: Record<domain, RegistryMapping>，上游注册表映射
+# MAX_FILE_SIZE = ""         # 单文件大小上限（字节）
+# IP_WHITELIST = ""          # IP 白名单（逗号分隔）
+# IP_BLACKLIST = ""          # IP 黑名单（逗号分隔）
+# REPO_WHITELIST = ""        # 仓库白名单（逗号分隔）
+# REPO_BLACKLIST = ""        # 仓库黑名单（逗号分隔）
+# TOKEN_CACHE_TTL = ""       # Token 缓存 TTL（秒）
+# MANIFEST_CACHE_TTL = ""    # Manifest 缓存 TTL（秒）
