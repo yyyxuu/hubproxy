@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { detectRegistry, handleRegistryRequest } from '../src/docker/registry'
-import { getCachedManifest } from '../src/utils/cache'
+import { getCachedManifest, setCachedManifest } from '../src/utils/cache'
 import { loadConfig } from '../src/config'
 import type { Env, FetchLike } from '../src/types'
 
@@ -219,6 +219,81 @@ describe('handleRegistryRequest', () => {
     const { fetchFn } = makeRoutedFetch(() => null)
     const response = await handleRegistryRequest(new Request('https://hub.example.com/v2/foo/bar/uploads/'), env, fetchFn)
     expect(response.status).toBe(404)
+  })
+
+  it('HEAD manifest 200 带 digest 时不写缓存（避免空 body 污染 KV）', async () => {
+    const { env, manifests } = makeEnv()
+    const { calls, fetchFn } = makeRoutedFetch(
+      () =>
+        new Response(null, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
+            'Docker-Content-Digest': 'sha256:def',
+          },
+        }),
+    )
+    const response = await handleRegistryRequest(
+      new Request('https://hub.example.com/v2/library/nginx/manifests/sha256:def', { method: 'HEAD' }),
+      env,
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    // 缓存未被写入：假 KV 保持为空，后续 GET 不会命中空 manifest
+    expect(manifests.store.size).toBe(0)
+    await expect(getCachedManifest(env, 'registry-1.docker.io/library/nginx', 'sha256:def')).resolves.toBeNull()
+    expect(calls).toHaveLength(1)
+  })
+
+  it('HEAD manifest 缓存命中：返回 manifest 头但 body 为空', async () => {
+    const { env } = makeEnv()
+    await setCachedManifest(env, 'registry-1.docker.io/library/nginx', 'sha256:abc', '{"schemaVersion":2}', 60)
+    const { calls, fetchFn } = makeRoutedFetch(() => new Response(null, { status: 404 }))
+    const response = await handleRegistryRequest(
+      new Request('https://hub.example.com/v2/library/nginx/manifests/sha256:abc', { method: 'HEAD' }),
+      env,
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Type')).toBe('application/vnd.docker.distribution.manifest.v2+json')
+    expect(response.headers.get('Docker-Content-Digest')).toBe('sha256:abc')
+    await expect(response.text()).resolves.toBe('')
+    // 缓存命中，未访问上游
+    expect(calls).toHaveLength(0)
+  })
+
+  it('自定义映射：key 与 upstream 不同时，上游 URL 用 mapping.upstream、缓存 key 仍用 key 域名', async () => {
+    const { env, manifests } = makeEnv()
+    env.UPSTREAM_REGISTRIES = JSON.stringify({
+      'docker.io': {
+        upstream: 'registry-1.docker.io',
+        authHost: 'https://auth.docker.io/token',
+        authType: 'anonymous',
+        enabled: true,
+      },
+    })
+    const body = '{"schemaVersion":2}'
+    const { calls, fetchFn } = makeRoutedFetch(
+      () =>
+        new Response(body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
+            'Docker-Content-Digest': 'sha256:abc',
+          },
+        }),
+    )
+    const response = await handleRegistryRequest(
+      new Request('https://hub.example.com/v2/docker.io/library/nginx/manifests/latest'),
+      env,
+      fetchFn,
+    )
+    // 上游请求主机取 mapping.upstream
+    expect(calls[0].url).toBe('https://registry-1.docker.io/v2/library/nginx/manifests/latest')
+    expect(response.status).toBe(200)
+    // 缓存 key 按 Ruling C 使用 key 域名（docker.io），而非 upstream 主机
+    await expect(getCachedManifest(env, 'docker.io/library/nginx', 'sha256:abc')).resolves.toBe(body)
+    expect(manifests.store.get('manifest:docker.io/library/nginx:sha256:abc')).toBe(body)
   })
 
   it('非 GET/HEAD 方法返回 405', async () => {

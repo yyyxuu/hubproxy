@@ -63,9 +63,11 @@ export async function handleRegistryRequest(request: Request, env: Env, fetchFn:
   if (name === '') return new Response('not found', { status: 404 })
 
   const { domain, repo } = detectRegistry(name, cfg)
+  // 上游 URL 主机取 mapping.upstream（key 与 upstream 可能不同，如 docker.io → registry-1.docker.io）
+  const upstreamHost = cfg.upstreamRegistries[domain]?.upstream ?? domain
   // 401 响应的 realm 改写指向自建 token 端点：https://<请求 Host>/token
   const baseUrl = `https://${url.host}`
-  const upstreamUrl = `https://${domain}/v2/${repo}/${kind}/${ref}${url.search}`
+  const upstreamUrl = `https://${upstreamHost}/v2/${repo}/${kind}/${ref}${url.search}`
 
   if (kind === 'blobs') {
     return handleBlob(request, fetchFn, upstreamUrl, baseUrl)
@@ -108,15 +110,18 @@ async function handleManifest(
   if (ref.includes(':')) {
     const cached = await getCachedManifest(env, cacheRepo, ref)
     if (cached !== null) {
-      return new Response(cached, {
-        status: 200,
-        headers: { 'Content-Type': CACHED_MANIFEST_CONTENT_TYPE, 'Docker-Content-Digest': ref },
-      })
+      const headers = { 'Content-Type': CACHED_MANIFEST_CONTENT_TYPE, 'Docker-Content-Digest': ref }
+      // HEAD 请求缓存命中时返回无 body 响应（仅头）
+      if (request.method === 'HEAD') {
+        return new Response(null, { status: 200, headers })
+      }
+      return new Response(cached, { status: 200, headers })
     }
   }
   const upstream = await fetchFn(buildUpstreamRequest(request, upstreamUrl), { redirect: 'follow' })
-  // 仅 200 且带 digest 时缓存；manifest 体积小允许缓冲，clone 读取不影响原 body 透传
-  if (upstream.status === 200) {
+  // 仅 200 且带 digest 时缓存；manifest 体积小允许缓冲，clone 读取不影响原 body 透传。
+  // HEAD 请求上游 body 为 null（fetch 规范），禁止写缓存，避免空 manifest 污染 KV
+  if (upstream.status === 200 && request.method !== 'HEAD') {
     const digest = upstream.headers.get('Docker-Content-Digest')
     if (digest) {
       const body = await upstream.clone().text()
