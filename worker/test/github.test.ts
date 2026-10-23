@@ -193,6 +193,28 @@ describe('handleGitHubProxy', () => {
     expect(text).toContain('https://hub.example.com/https://github.com/foo/bar/raw/main/a.sh')
   })
 
+  it('CE=gzip 但 body 已被运行时解压（无 gzip 魔数）的 .sh 仍能改写，不应 502', async () => {
+    // 生产环境实测：CF Workers 运行时对 fetch() 响应自动解压 gzip，但保留
+    // Content-Encoding: gzip 头。此时 body 是明文，不能二次解压（魔数判断兜底）。
+    const original = 'echo https://github.com/foo/bar/raw/main/a.sh'
+    const { fetchFn } = makeGithubFetch(
+      () =>
+        new Response(original, {
+          status: 200,
+          headers: { 'Content-Encoding': 'gzip', 'Content-Type': 'text/x-shellscript' },
+        }),
+    )
+    const response = await handleGitHubProxy(
+      new Request('https://hub.example.com/https://github.com/owner/repo/raw/main/install.sh'),
+      makeEnv(),
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    const text = await response.text()
+    expect(text).toContain('https://hub.example.com/https://github.com/foo/bar/raw/main/a.sh')
+    expect(response.headers.get('Content-Encoding')).toBeNull()
+  })
+
   it('上游 Content-Type: text/html 且 GET → 403', async () => {
     const { calls, fetchFn } = makeGithubFetch(
       () => new Response('<html></html>', { status: 200, headers: { 'Content-Type': 'text/html' } }),

@@ -210,17 +210,21 @@ export async function handleGitHubProxy(request: Request, env: Env, fetchFn: Fet
   if (isScriptUrl(currentUrl)) {
     const contentEncoding = upstream.headers.get('Content-Encoding')?.toLowerCase() ?? ''
     if (contentEncoding === 'gzip' || contentEncoding === '') {
+      // 注意：CF Workers 运行时会对 fetch() 响应自动解压 gzip，但可能仍保留
+      // Content-Encoding: gzip 头。因此不能仅凭头判断，需按 gzip 魔数(1f 8b)
+      // 判断 body 是否真的是压缩字节（脚本体积小，允许整体缓冲）。
       let bodyText: string
-      if (contentEncoding === 'gzip' && upstream.body !== null) {
-        try {
-          const decompressed = upstream.body.pipeThrough(new DecompressionStream('gzip'))
+      try {
+        const raw = new Uint8Array(await upstream.arrayBuffer())
+        if (contentEncoding === 'gzip' && raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b) {
+          const decompressed = new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'))
           bodyText = await new Response(decompressed).text()
-        } catch {
-          // 对齐上游 github.go：脚本处理失败 → 502
-          return new Response('脚本处理失败', { status: 502 })
+        } else {
+          bodyText = new TextDecoder().decode(raw)
         }
-      } else {
-        bodyText = await upstream.text()
+      } catch {
+        // 对齐上游 github.go：脚本处理失败 → 502
+        return new Response('脚本处理失败', { status: 502 })
       }
       const rewritten = rewriteScriptBody(bodyText, host)
       const scriptHeaders = passthroughHeaders(upstream.headers)
