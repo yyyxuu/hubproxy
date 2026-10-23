@@ -51,8 +51,14 @@ describe('passthroughHeaders', () => {
 })
 
 describe('isBlockedHtml', () => {
-  it('text/html（含参数）判定为需要拦截', () => {
+  it('四种 HTML/XML 媒体类型均判定为需要拦截', () => {
+    // 对齐上游 src/handlers/github.go 的 blockedContentTypes
+    expect(isBlockedHtml('text/html')).toBe(true)
     expect(isBlockedHtml('text/html; charset=utf-8')).toBe(true)
+    expect(isBlockedHtml('application/xhtml+xml')).toBe(true)
+    expect(isBlockedHtml('text/xml')).toBe(true)
+    expect(isBlockedHtml('application/xml')).toBe(true)
+    expect(isBlockedHtml('application/xml; charset=utf-8')).toBe(true)
   })
 
   it('application/octet-stream 判定为放行', () => {

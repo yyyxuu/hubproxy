@@ -32,12 +32,15 @@ export function cleanSecurityHeaders(headers: Headers): void {
   }
 }
 
-/** 判断 Content-Type 是否为 HTML（拦截 GitHub 返回的 HTML 错误页，避免把页面当 API 响应透传） */
+/** 需要拦截的 HTML/XML 媒体类型（对齐上游 src/handlers/github.go 的 blockedContentTypes） */
+const BLOCKED_CONTENT_TYPES = new Set(['text/html', 'application/xhtml+xml', 'text/xml', 'application/xml'])
+
+/** 判断 Content-Type 是否为 HTML/XML（拦截 GitHub 返回的 HTML/XML 响应，避免把页面当 API 响应透传） */
 export function isBlockedHtml(contentType: string | null): boolean {
   if (!contentType) return false
   // 取分号前的媒体类型部分（忽略 charset 等参数）再比较
   const mediaType = contentType.split(';')[0].trim().toLowerCase()
-  return mediaType === 'text/html'
+  return BLOCKED_CONTENT_TYPES.has(mediaType)
 }
 
 /**
