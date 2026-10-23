@@ -61,12 +61,15 @@ describe('buildHandler 路由装配', () => {
     await expect(response.json()).resolves.toEqual({ ready: true, service: 'hubproxy-worker' })
   })
 
-  it('GET /v2/ → 200 且带 Docker-Distribution-Api-Version（本地应答，不访问上游）', async () => {
+  it('GET /v2/ → 401 + Bearer challenge（本地应答，不访问上游）', async () => {
     const { calls, fetchFn } = makeRoutedFetch()
     const handler = buildHandler(fetchFn)
     const response = await handler(new Request('https://hub.example.com/v2/'), makeEnv())
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(401)
     expect(response.headers.get('Docker-Distribution-Api-Version')).toBe('registry/2.0')
+    expect(response.headers.get('WWW-Authenticate')).toBe(
+      'Bearer realm="https://hub.example.com/token",service="registry.docker.io"',
+    )
     expect(calls).toHaveLength(0)
   })
 
@@ -74,8 +77,9 @@ describe('buildHandler 路由装配', () => {
     const { fetchFn } = makeRoutedFetch()
     const handler = buildHandler(fetchFn)
     const response = await handler(new Request('https://hub.example.com/v2'), makeEnv())
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(401)
     expect(response.headers.get('Docker-Distribution-Api-Version')).toBe('registry/2.0')
+    expect(response.headers.get('WWW-Authenticate')).toContain('realm="https://hub.example.com/token"')
   })
 
   it('GET /token?service=...&scope=... → 200 token JSON，query 原样透传给 auth.docker.io', async () => {

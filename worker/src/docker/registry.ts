@@ -43,9 +43,19 @@ export async function handleRegistryRequest(request: Request, env: Env, fetchFn:
     return new Response('method not allowed', { status: 405 })
   }
 
-  // /v2/ 本地应答：宣告端点兼容 registry v2 API，不访问上游
+  // /v2/ ping：返回 401 + Bearer challenge（对齐 Docker Hub 真实行为）。
+  // docker 客户端依据 ping 的 401 challenge 武装 Bearer token 认证；
+  // 若这里返回 200（声称免认证），docker 不会进入 token 换发流程，
+  // 后续 manifest 的 401 就会直接以 "unauthorized: authentication required" 失败。
   if (path === '/v2' || path === '/v2/') {
-    return new Response(null, { status: 200, headers: { 'Docker-Distribution-Api-Version': 'registry/2.0' } })
+    const baseUrl = `https://${url.host}`
+    return new Response(null, {
+      status: 401,
+      headers: {
+        'Docker-Distribution-Api-Version': 'registry/2.0',
+        'WWW-Authenticate': `Bearer realm="${baseUrl}/token",service="registry.docker.io"`,
+      },
+    })
   }
 
   // 其余路径必须以 /v2/ 开头，否则 404

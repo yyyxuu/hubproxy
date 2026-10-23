@@ -66,12 +66,15 @@ describe('detectRegistry', () => {
 })
 
 describe('handleRegistryRequest', () => {
-  it('GET /v2/ 本地应答 200 且含 Docker-Distribution-Api-Version', async () => {
+  it('GET /v2/ 返回 401 + Bearer challenge（对齐 Docker Hub，让 docker 客户端武装 token 认证）', async () => {
     const { env } = makeEnv()
     const { fetchFn } = makeRoutedFetch(() => null)
     const response = await handleRegistryRequest(new Request('https://hub.example.com/v2/'), env, fetchFn)
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(401)
     expect(response.headers.get('Docker-Distribution-Api-Version')).toBe('registry/2.0')
+    expect(response.headers.get('WWW-Authenticate')).toBe(
+      'Bearer realm="https://hub.example.com/token",service="registry.docker.io"',
+    )
   })
 
   it('manifests 转发到 docker hub 上游且 Accept 头透传', async () => {
