@@ -77,6 +77,20 @@ describe('handleRegistryRequest', () => {
     )
   })
 
+  it('GET /v2/ 带 Authorization 时转发到默认上游验证 token 并返回上游结果', async () => {
+    const { env } = makeEnv()
+    const { calls, fetchFn } = makeRoutedFetch(() => new Response('ok', { status: 200 }))
+    const response = await handleRegistryRequest(
+      new Request('https://hub.example.com/v2/', { headers: { Authorization: 'Bearer tok' } }),
+      env,
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('https://registry-1.docker.io/v2/')
+    expect(calls[0].headers.get('Authorization')).toBe('Bearer tok')
+  })
+
   it('manifests 转发到 docker hub 上游且 Accept 头透传', async () => {
     const { env } = makeEnv()
     const { calls, fetchFn } = makeRoutedFetch(
