@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { detectRegistry, handleRegistryRequest } from '../src/docker/registry'
-import { getCachedManifest, setCachedManifest } from '../src/utils/cache'
+import { getCachedManifest, setCachedManifest, setCachedToken } from '../src/utils/cache'
 import { loadConfig } from '../src/config'
 import type { Env, FetchLike } from '../src/types'
 
@@ -108,14 +108,83 @@ describe('handleRegistryRequest', () => {
     expect(response.status).toBe(200)
   })
 
-  it('上游 401 时 WWW-Authenticate 的 realm 改写为 https://<请求Host>/token', async () => {
+  it('上游 401 时代理内部从挑战 realm 换 token，带 Bearer 重试后返回 200（docker 无需感知认证）', async () => {
     const { env } = makeEnv()
-    const { fetchFn } = makeRoutedFetch(
-      () =>
-        new Response('unauthorized', {
+    const manifestUrl = 'https://registry-1.docker.io/v2/library/nginx/manifests/latest'
+    const calls: Array<{ url: string; auth: string | null }> = []
+    const fetchFn: FetchLike = async (input, init) => {
+      const req = input instanceof Request ? input : new Request(input)
+      calls.push({ url: req.url, auth: req.headers.get('Authorization') })
+      if (req.url.startsWith('https://auth.docker.io/token')) {
+        return new Response(JSON.stringify({ token: 'tok123', expires_in: 300 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (req.url === manifestUrl) {
+        if (req.headers.get('Authorization') === 'Bearer tok123') {
+          return new Response('{"schemaVersion":2}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json' },
+          })
+        }
+        return new Response('unauthorized', {
           status: 401,
-          headers: { 'WWW-Authenticate': 'Bearer realm="https://auth.docker.io/token",service="registry.docker.io"' },
-        }),
+          headers: {
+            'WWW-Authenticate':
+              'Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull"',
+          },
+        })
+      }
+      return new Response(null, { status: 404 })
+    }
+    const response = await handleRegistryRequest(
+      new Request('https://hub.example.com/v2/library/nginx/manifests/latest'),
+      env,
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    // 序列：manifest(无 token) → auth 换 token → manifest(带 Bearer)
+    expect(calls).toHaveLength(3)
+    expect(calls[0].url).toBe(manifestUrl)
+    expect(calls[1].url).toContain('auth.docker.io/token')
+    expect(calls[1].url).toContain('service=registry.docker.io')
+    expect(calls[1].url).toContain('scope=repository')
+    expect(calls[2].url).toBe(manifestUrl)
+    expect(calls[2].auth).toBe('Bearer tok123')
+  })
+
+  it('已缓存的 token 在首次请求即带上，不再走 401 往返', async () => {
+    const { env } = makeEnv()
+    await setCachedToken(env, 'registry.docker.io', 'repository:library/nginx:pull', 'cachedtok', 300)
+    const manifestUrl = 'https://registry-1.docker.io/v2/library/nginx/manifests/latest'
+    const calls: Array<{ url: string; auth: string | null }> = []
+    const fetchFn: FetchLike = async (input) => {
+      const req = input instanceof Request ? input : new Request(input)
+      calls.push({ url: req.url, auth: req.headers.get('Authorization') })
+      return new Response('{"schemaVersion":2}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json' },
+      })
+    }
+    const response = await handleRegistryRequest(
+      new Request('https://hub.example.com/v2/library/nginx/manifests/latest'),
+      env,
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe(manifestUrl)
+    expect(calls[0].auth).toBe('Bearer cachedtok')
+  })
+
+  it('上游 401 且无法完成认证时，返回 401 且 realm 改写为自建 /token（兜底）', async () => {
+    const { env } = makeEnv()
+    const { fetchFn } = makeRoutedFetch(() =>
+      new Response('unauthorized', {
+        status: 401,
+        headers: { 'WWW-Authenticate': 'Bearer realm="https://auth.docker.io/token",service="registry.docker.io"' },
+      }),
     )
     const response = await handleRegistryRequest(
       new Request('https://hub.example.com/v2/library/nginx/manifests/latest'),
