@@ -22,7 +22,7 @@ const GITHUB_EXPS: RegExp[] = [
   /^(?:https?:\/\/)?github\.com\/([^/]+)\/([^/]+)\/(?:info|git-).*/,
   /^(?:https?:\/\/)?raw\.github(?:usercontent|)\.com\/([^/]+)\/([^/]+)\/.+?\/.+/,
   /^(?:https?:\/\/)?gist\.(?:githubusercontent|github)\.com\/([^/]+)\/([^/]+).*/,
-  /^(?:https?:\/\/)?api\.github\.com\/repos\/([^/]+)\/([^/]+)\/.*/,
+  /^(?:https?:\/\/)?api\.github\.com\/repos\/([^/]+)\/([^/]+)(?:\/.*)?/,
   /^(?:https?:\/\/)?huggingface\.co(?:\/spaces)?\/([^/]+)\/(.+)/,
   /^(?:https?:\/\/)?cdn-lfs\.hf\.co(?:\/spaces)?\/([^/]+)\/([^/]+)(?:\/(.*))?/,
   /^(?:https?:\/\/)?(github|opengraph)\.githubassets\.com\/([^/]+)\/.+?/,

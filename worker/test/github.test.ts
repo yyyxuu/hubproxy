@@ -62,6 +62,8 @@ describe('checkGitHubURL', () => {
     expect(checkGitHubURL('https://raw.githubusercontent.com/owner/repo/main/file')).not.toBeNull()
     expect(checkGitHubURL('https://gist.github.com/user/gistid')).not.toBeNull()
     expect(checkGitHubURL('https://api.github.com/repos/owner/repo/releases')).not.toBeNull()
+    // 裸仓库端点（无尾部路径）也必须匹配
+    expect(checkGitHubURL('https://api.github.com/repos/owner/repo')).not.toBeNull()
     expect(checkGitHubURL('https://huggingface.co/org/model/resolve/main/x.bin')).not.toBeNull()
     expect(checkGitHubURL('https://cdn-lfs.hf.co/org/model/x')).not.toBeNull()
   })
@@ -368,6 +370,22 @@ describe('handleGitHubProxy', () => {
       fetchFn,
     )
     expect(response.status).toBe(200)
+    expect(calls[0].headers.get('Authorization')).toBe('Bearer t')
+  })
+
+  it('裸仓库端点 /repos/owner/repo（无尾部路径）也可代理且透传 Authorization', async () => {
+    const { calls, fetchFn } = makeGithubFetch(
+      () => new Response('{"full_name":"owner/repo"}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const response = await handleGitHubProxy(
+      new Request('https://hub.example.com/https://api.github.com/repos/owner/repo', {
+        headers: { Authorization: 'Bearer t' },
+      }),
+      makeEnv(),
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    expect(calls[0].url).toBe('https://api.github.com/repos/owner/repo')
     expect(calls[0].headers.get('Authorization')).toBe('Bearer t')
   })
 
