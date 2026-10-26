@@ -1,0 +1,53 @@
+# HubProxy Cloudflare Worker 配置
+name = "hubproxy-worker"
+main = "src/index.ts"
+# Workers 平台兼容性日期
+compatibility_date = "2026-10-12"
+
+# KV 命名空间：正式部署前必须先运行
+#   npx wrangler kv namespace create TOKENS
+#   npx wrangler kv namespace create MANIFESTS
+# 并把命令返回的真实 id 替换下方占位符（否则 deploy 会被 Cloudflare API 拒绝）。
+# 下方全 0 占位符仅供本地 `wrangler dev` / dry-run 使用。
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "00000000000000000000000000000000"
+
+[[kv_namespaces]]
+binding = "MANIFESTS"
+id = "00000000000000000000000000000000"
+
+# 运行时配置（均可选，未设置时回退到 src/config.ts 的内置默认逻辑）。
+# 这里只列出非空默认值，其余项以注释形式给出示例，按需取消注释修改。
+[vars]
+# GitHub/HF 路径单文件大小上限（字节），默认 2GB
+MAX_FILE_SIZE = "2147483648"
+# Docker Token 缓存 TTL（秒），默认 20 分钟
+TOKEN_CACHE_TTL = "1200"
+# Manifest 缓存 TTL（秒），默认 1 小时（仅缓存带 digest 的 immutable manifest）
+MANIFEST_CACHE_TTL = "3600"
+
+# 以下变量默认不设置，按需取消注释并修改：
+# 上游注册表映射（JSON：domain → upstream/authHost/authType/enabled）。
+# 不设置时内置默认覆盖 Docker Hub / ghcr.io / gcr.io / quay.io / registry.k8s.io；
+# 合法 JSON 会与内置默认合并，非法 JSON 静默回退内置默认。
+# UPSTREAM_REGISTRIES = '{"ghcr.io":{"upstream":"ghcr.io","authHost":"https://ghcr.io/token","authType":"github","enabled":true}}'
+# IP 黑白名单（逗号分隔，支持 CIDR，IPv6 归一为 /64；基于 CF-Connecting-IP，黑名单命中即 403）
+# IP_WHITELIST = ""
+# IP_BLACKLIST = ""
+# 仓库/镜像黑白名单（逗号分隔，支持通配符，如 "baduser/*"、*/malicious-repo）
+# REPO_WHITELIST = ""
+# REPO_BLACKLIST = ""
+
+# 自定义域名绑定（二选一）：
+# 方式 A：取消下方注释并把域名换成你自己的，wrangler deploy 时会自动在该 zone 下创建 Custom Domain
+# [[routes]]
+# pattern = "hub.<你的域名>.com"
+# custom_domain = true
+# 方式 B：部署后在 Cloudflare Dashboard → Workers & Pages → hubproxy-worker
+#         → Settings → Domains & Routes 中手动绑定
+
+# CPU 限额说明：免费计划 10ms/请求、付费计划默认 30s。本 Worker 只做流式转发，
+# 默认限额足够，无需显式配置；如需显式设置可参考：
+# [limits]
+# cpu_ms = 30000

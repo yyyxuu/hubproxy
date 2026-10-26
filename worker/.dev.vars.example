@@ -1,0 +1,25 @@
+# 本地开发环境变量示例（供 wrangler dev 读取）
+# 用法：复制为 worker/.dev.vars 后按需修改（.dev.vars 已被 git 忽略，不会提交）
+# 注意：TOKENS / MANIFESTS 两个 KV 绑定由 wrangler dev 的本地模拟自动提供，无需在此配置
+
+# —— 以下为非空默认值，与 wrangler.toml [vars] 保持一致 ——
+
+# GitHub/HF 路径单文件大小上限（字节）
+MAX_FILE_SIZE=2147483648
+# Docker Token 缓存 TTL（秒）
+TOKEN_CACHE_TTL=1200
+# Manifest 缓存 TTL（秒）
+MANIFEST_CACHE_TTL=3600
+
+# —— 以下默认不设置，按需取消注释并修改 ——
+
+# 上游注册表映射（JSON）。不设置时使用内置默认（Docker Hub / ghcr.io / gcr.io / quay.io / registry.k8s.io）
+#UPSTREAM_REGISTRIES={"ghcr.io":{"upstream":"ghcr.io","authHost":"https://ghcr.io/token","authType":"github","enabled":true}}
+
+# IP 黑白名单（逗号分隔，支持 CIDR，IPv6 归一为 /64）
+#IP_WHITELIST=
+#IP_BLACKLIST=
+
+# 仓库/镜像黑白名单（逗号分隔，支持通配符）
+#REPO_WHITELIST=
+#REPO_BLACKLIST=

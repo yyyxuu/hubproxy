@@ -29,3 +29,9 @@ docs/.astro/
 
 # Logs
 *.log
+
+# Worker (worker/)
+worker/node_modules/
+worker/.wrangler/
+worker/.dev.vars
+worker/wrangler.local.json
