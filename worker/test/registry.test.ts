@@ -91,6 +91,21 @@ describe('handleRegistryRequest', () => {
     expect(calls[0].headers.get('Authorization')).toBe('Bearer tok')
   })
 
+  it('默认 Docker Hub 下单段仓库名补 library/ 前缀（docker pull 域名/nginx 时客户端请求 /v2/nginx）', async () => {
+    const { env } = makeEnv()
+    const { calls, fetchFn } = makeRoutedFetch(
+      () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const response = await handleRegistryRequest(
+      new Request('https://hub.example.com/v2/nginx/manifests/latest'),
+      env,
+      fetchFn,
+    )
+    expect(response.status).toBe(200)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('https://registry-1.docker.io/v2/library/nginx/manifests/latest')
+  })
+
   it('manifests 转发到 docker hub 上游且 Accept 头透传', async () => {
     const { env } = makeEnv()
     const { calls, fetchFn } = makeRoutedFetch(

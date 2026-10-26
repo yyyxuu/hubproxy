@@ -81,17 +81,21 @@ export async function handleRegistryRequest(request: Request, env: Env, fetchFn:
   if (name === '') return new Response('not found', { status: 404 })
 
   const { domain, repo } = detectRegistry(name, cfg)
+  // Docker Hub 官方镜像在 registry API 中带 library/ 前缀（如 library/nginx），
+  // 但 docker pull <自定义域名>/nginx 时客户端只请求 /v2/nginx/...（不会自动补 library/）。
+  // 对齐 Docker Hub 语义：仅默认 Docker Hub 上游、且仓库名为单段时补 library/。
+  const normalizedRepo = domain === DEFAULT_DOMAIN && !repo.includes('/') ? `library/${repo}` : repo
   // 上游 URL 主机取 mapping.upstream（key 与 upstream 可能不同，如 docker.io → registry-1.docker.io）
   const upstreamHost = cfg.upstreamRegistries[domain]?.upstream ?? domain
   // 401 响应的 realm 改写指向自建 token 端点：https://<请求 Host>/token
   const baseUrl = `https://${url.host}`
-  const upstreamUrl = `https://${upstreamHost}/v2/${repo}/${kind}/${ref}${url.search}`
+  const upstreamUrl = `https://${upstreamHost}/v2/${normalizedRepo}/${kind}/${ref}${url.search}`
 
   if (kind === 'blobs') {
     return handleBlob(request, fetchFn, upstreamUrl, baseUrl)
   }
   if (kind === 'manifests') {
-    return handleManifest(request, env, fetchFn, cfg, upstreamUrl, baseUrl, `${domain}/${repo}`, ref)
+    return handleManifest(request, env, fetchFn, cfg, upstreamUrl, baseUrl, `${domain}/${normalizedRepo}`, ref)
   }
   if (kind === 'tags' && ref === 'list') {
     return handleTags(request, fetchFn, upstreamUrl, baseUrl)
