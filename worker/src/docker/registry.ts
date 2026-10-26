@@ -232,12 +232,12 @@ async function handleManifest(
   if (ref.includes(':')) {
     const cached = await getCachedManifest(env, cacheRepo, ref)
     if (cached !== null) {
-      const headers = { 'Content-Type': CACHED_MANIFEST_CONTENT_TYPE, 'Docker-Content-Digest': ref }
+      const headers = { 'Content-Type': cached.contentType, 'Docker-Content-Digest': ref }
       // HEAD 请求缓存命中时返回无 body 响应（仅头）
       if (request.method === 'HEAD') {
         return new Response(null, { status: 200, headers })
       }
-      return new Response(cached, { status: 200, headers })
+      return new Response(cached.body, { status: 200, headers })
     }
   }
   const upstream = await fetchUpstreamWithAuth(request, env, fetchFn, cfg, upstreamUrl, service, scope)
@@ -247,8 +247,9 @@ async function handleManifest(
   if (upstream.status === 200 && request.method !== 'HEAD') {
     const digest = upstream.headers.get('Docker-Content-Digest')
     if (digest) {
+      const contentType = upstream.headers.get('Content-Type') ?? CACHED_MANIFEST_CONTENT_TYPE
       const body = await upstream.clone().text()
-      await setCachedManifest(env, cacheRepo, digest, body, cfg.manifestCacheTTL).catch(() => {})
+      await setCachedManifest(env, cacheRepo, digest, body, cfg.manifestCacheTTL, contentType).catch(() => {})
     }
   }
   return passthroughResponse(upstream, upstream.body, baseUrl)

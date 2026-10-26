@@ -213,8 +213,11 @@ describe('handleRegistryRequest', () => {
     // 首次按 tag 请求：必须访问上游；body 按 digest 写缓存（缓存 key 按 Ruling C 带上游域名）
     const first = await handleRegistryRequest(new Request('https://hub.example.com/v2/library/nginx/manifests/latest'), env, fetchFn)
     expect(first.status).toBe(200)
-    await expect(getCachedManifest(env, 'registry-1.docker.io/library/nginx', 'sha256:abc')).resolves.toBe(body)
-    expect(manifests.store.get('manifest:registry-1.docker.io/library/nginx:sha256:abc')).toBe(body)
+    await expect(getCachedManifest(env, 'registry-1.docker.io/library/nginx', 'sha256:abc')).resolves.toEqual({
+      contentType: 'application/vnd.docker.distribution.manifest.v2+json',
+      body,
+    })
+    expect(manifests.store.get('manifest:registry-1.docker.io/library/nginx:sha256:abc')).toContain('"body":')
 
     // 二次按 digest 请求：缓存命中，直接返回缓存体、不再调 mock
     const second = await handleRegistryRequest(
@@ -369,7 +372,7 @@ describe('handleRegistryRequest', () => {
 
   it('HEAD manifest 缓存命中：返回 manifest 头但 body 为空', async () => {
     const { env } = makeEnv()
-    await setCachedManifest(env, 'registry-1.docker.io/library/nginx', 'sha256:abc', '{"schemaVersion":2}', 60)
+    await setCachedManifest(env, 'registry-1.docker.io/library/nginx', 'sha256:abc', '{"schemaVersion":2}', 60, 'application/vnd.docker.distribution.manifest.v2+json')
     const { calls, fetchFn } = makeRoutedFetch(() => new Response(null, { status: 404 }))
     const response = await handleRegistryRequest(
       new Request('https://hub.example.com/v2/library/nginx/manifests/sha256:abc', { method: 'HEAD' }),
@@ -414,8 +417,11 @@ describe('handleRegistryRequest', () => {
     expect(calls[0].url).toBe('https://registry-1.docker.io/v2/library/nginx/manifests/latest')
     expect(response.status).toBe(200)
     // 缓存 key 按 Ruling C 使用 key 域名（docker.io），而非 upstream 主机
-    await expect(getCachedManifest(env, 'docker.io/library/nginx', 'sha256:abc')).resolves.toBe(body)
-    expect(manifests.store.get('manifest:docker.io/library/nginx:sha256:abc')).toBe(body)
+    await expect(getCachedManifest(env, 'docker.io/library/nginx', 'sha256:abc')).resolves.toEqual({
+      contentType: 'application/vnd.docker.distribution.manifest.v2+json',
+      body,
+    })
+    expect(manifests.store.get('manifest:docker.io/library/nginx:sha256:abc')).toContain('"body":')
   })
 
   it('非 GET/HEAD 方法返回 405', async () => {

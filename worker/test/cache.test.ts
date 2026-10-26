@@ -80,12 +80,17 @@ describe('token 缓存', () => {
 })
 
 describe('manifest 缓存', () => {
-  it('setCachedManifest 后 getCachedManifest 返回原值，TTL 透传', async () => {
+  it('setCachedManifest 后 getCachedManifest 返回 body + Content-Type，TTL 透传', async () => {
     const { env, manifests } = makeEnv()
-    await setCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc', '{}', 60)
-    expect(manifests.store.get('manifest:ghcr.io/owner/app:sha256:abc')).toBe('{}')
+    await setCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc', '{}', 60, 'application/vnd.oci.image.index.v1+json')
+    expect(manifests.store.get('manifest:ghcr.io/owner/app:sha256:abc')).toBe(
+      JSON.stringify({ contentType: 'application/vnd.oci.image.index.v1+json', body: '{}' }),
+    )
     expect(manifests.ttls.get('manifest:ghcr.io/owner/app:sha256:abc')).toBe(60)
-    await expect(getCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc')).resolves.toBe('{}')
+    await expect(getCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc')).resolves.toEqual({
+      contentType: 'application/vnd.oci.image.index.v1+json',
+      body: '{}',
+    })
   })
 
   it('未命中时返回 null', async () => {
@@ -93,13 +98,25 @@ describe('manifest 缓存', () => {
     await expect(getCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc')).resolves.toBeNull()
   })
 
+  it('旧格式（裸 body，无 contentType）视为未命中，避免头体不一致', async () => {
+    const { env, manifests } = makeEnv()
+    manifests.store.set('manifest:ghcr.io/owner/app:sha256:abc', '{"schemaVersion":2}')
+    await expect(getCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc')).resolves.toBeNull()
+  })
+
   it('不同 digest 的 key 不串', async () => {
     const { env, manifests } = makeEnv()
-    await setCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc', '{}', 60)
-    await setCachedManifest(env, 'ghcr.io/owner/app', 'sha256:def', '{"x":1}', 60)
-    expect(manifests.store.get('manifest:ghcr.io/owner/app:sha256:abc')).toBe('{}')
-    expect(manifests.store.get('manifest:ghcr.io/owner/app:sha256:def')).toBe('{"x":1}')
-    await expect(getCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc')).resolves.toBe('{}')
-    await expect(getCachedManifest(env, 'ghcr.io/owner/app', 'sha256:def')).resolves.toBe('{"x":1}')
+    await setCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc', '{}', 60, 'application/vnd.oci.image.index.v1+json')
+    await setCachedManifest(env, 'ghcr.io/owner/app', 'sha256:def', '{"x":1}', 60, 'application/vnd.docker.distribution.manifest.v2+json')
+    expect(manifests.store.get('manifest:ghcr.io/owner/app:sha256:abc')).toContain('"body":"{}"')
+    expect(manifests.store.get('manifest:ghcr.io/owner/app:sha256:def')).toContain('"body":"{\\"x\\":1}"')
+    await expect(getCachedManifest(env, 'ghcr.io/owner/app', 'sha256:abc')).resolves.toEqual({
+      contentType: 'application/vnd.oci.image.index.v1+json',
+      body: '{}',
+    })
+    await expect(getCachedManifest(env, 'ghcr.io/owner/app', 'sha256:def')).resolves.toEqual({
+      contentType: 'application/vnd.docker.distribution.manifest.v2+json',
+      body: '{"x":1}',
+    })
   })
 })
