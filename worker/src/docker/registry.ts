@@ -43,27 +43,17 @@ export async function handleRegistryRequest(request: Request, env: Env, fetchFn:
     return new Response('method not allowed', { status: 405 })
   }
 
-  // /v2/ ping：
-  // - 无 Authorization → 401 + Bearer challenge（对齐 Docker Hub 真实行为）。
-  //   docker 客户端依据 ping 的 401 challenge 武装 Bearer token 认证；
-  //   若这里返回 200（声称免认证），docker 不会进入 token 换发流程，
-  //   后续 manifest 的 401 就会直接以 "unauthorized: authentication required" 失败。
-  // - 带 Authorization → 转发到默认上游 /v2/ 验证 token，返回上游结果（有 token 时 200，与 Docker Hub 一致）
+  // /v2/ ping：返回 200（对齐 Go 原版 c.JSON(200, gin.H{})）。
+  // docker 在 ping 拿到 200 后直接请求 manifest；manifest 的 401 会带正确的
+  // service/scope 挑战，docker 再据此换发 token —— 这样多注册表（ghcr 等）也能拿到各自正确的 token。
   if (path === '/v2' || path === '/v2/') {
-    const baseUrl = `https://${url.host}`
-    if (!request.headers.has('Authorization')) {
-      return new Response(null, {
-        status: 401,
-        headers: {
-          'Docker-Distribution-Api-Version': 'registry/2.0',
-          'WWW-Authenticate': `Bearer realm="${baseUrl}/token",service="registry.docker.io"`,
-        },
-      })
-    }
-    const upstreamHost = cfg.upstreamRegistries[DEFAULT_DOMAIN]?.upstream ?? DEFAULT_DOMAIN
-    const upstreamUrl = `https://${upstreamHost}/v2/${url.search}`
-    const upstream = await fetchFn(buildUpstreamRequest(request, upstreamUrl), { redirect: 'follow' })
-    return passthroughResponse(upstream, request.method === 'HEAD' ? null : upstream.body, baseUrl)
+    return new Response('{}', {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Docker-Distribution-Api-Version': 'registry/2.0',
+      },
+    })
   }
 
   // 其余路径必须以 /v2/ 开头，否则 404

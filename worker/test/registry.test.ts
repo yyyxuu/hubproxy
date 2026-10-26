@@ -66,29 +66,12 @@ describe('detectRegistry', () => {
 })
 
 describe('handleRegistryRequest', () => {
-  it('GET /v2/ 返回 401 + Bearer challenge（对齐 Docker Hub，让 docker 客户端武装 token 认证）', async () => {
+  it('GET /v2/ 返回 200（对齐 Go 原版；docker 在 manifest 401 时按挑战换 token）', async () => {
     const { env } = makeEnv()
     const { fetchFn } = makeRoutedFetch(() => null)
     const response = await handleRegistryRequest(new Request('https://hub.example.com/v2/'), env, fetchFn)
-    expect(response.status).toBe(401)
-    expect(response.headers.get('Docker-Distribution-Api-Version')).toBe('registry/2.0')
-    expect(response.headers.get('WWW-Authenticate')).toBe(
-      'Bearer realm="https://hub.example.com/token",service="registry.docker.io"',
-    )
-  })
-
-  it('GET /v2/ 带 Authorization 时转发到默认上游验证 token 并返回上游结果', async () => {
-    const { env } = makeEnv()
-    const { calls, fetchFn } = makeRoutedFetch(() => new Response('ok', { status: 200 }))
-    const response = await handleRegistryRequest(
-      new Request('https://hub.example.com/v2/', { headers: { Authorization: 'Bearer tok' } }),
-      env,
-      fetchFn,
-    )
     expect(response.status).toBe(200)
-    expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe('https://registry-1.docker.io/v2/')
-    expect(calls[0].headers.get('Authorization')).toBe('Bearer tok')
+    expect(response.headers.get('Docker-Distribution-Api-Version')).toBe('registry/2.0')
   })
 
   it('默认 Docker Hub 下单段仓库名补 library/ 前缀（docker pull 域名/nginx 时客户端请求 /v2/nginx）', async () => {
