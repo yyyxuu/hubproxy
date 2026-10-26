@@ -4,11 +4,11 @@ main = "src/index.ts"
 # Workers 平台兼容性日期
 compatibility_date = "2026-10-12"
 
-# KV 命名空间：id 为占位符（全 0），本地 `npm run dev` / dry-run 可直接使用；
-# 正式部署前必须先运行
+# KV 命名空间：正式部署前必须先运行
 #   npx wrangler kv namespace create TOKENS
 #   npx wrangler kv namespace create MANIFESTS
-# 并把命令返回的真实 id 替换下方占位符（否则部署会被 Cloudflare API 拒绝）
+# 并把命令返回的真实 id 替换下方占位符（否则 deploy 会被 Cloudflare API 拒绝）。
+# 下方全 0 占位符仅供本地 `wrangler dev` / dry-run 使用。
 [[kv_namespaces]]
 binding = "TOKENS"
 id = "00000000000000000000000000000000"
@@ -39,11 +39,11 @@ MANIFEST_CACHE_TTL = "3600"
 # REPO_WHITELIST = ""
 # REPO_BLACKLIST = ""
 
-# 自定义域名绑定（二选一，把 hub.<你的域名>.com 换成你的子域名）：
-# 方式 A：取消下方注释，wrangler deploy 时会自动在该 zone 下创建 Custom Domain
-# routes = [
-#   { pattern = "hub.<你的域名>.com", custom_domain = true }
-# ]
+# 自定义域名绑定（二选一）：
+# 方式 A：取消下方注释并把域名换成你自己的，wrangler deploy 时会自动在该 zone 下创建 Custom Domain
+# [[routes]]
+# pattern = "hub.<你的域名>.com"
+# custom_domain = true
 # 方式 B：部署后在 Cloudflare Dashboard → Workers & Pages → hubproxy-worker
 #         → Settings → Domains & Routes 中手动绑定
 
