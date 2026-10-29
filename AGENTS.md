@@ -7,6 +7,7 @@ HubProxy is a single-binary Go reverse proxy that accelerates Docker (Registry A
 - `src/` — the entire Go backend (module `hubproxy`, Go 1.26): packages `config/`, `handlers/`, `utils/`.
 - `web/` — Vue 3 + Vite + Tailwind 4 SPA; builds into `src/dist/` (gitignored, not committed).
 - `docs/` — Astro Starlight docs site (Chinese default + `en/` mirror).
+- `worker/` — separate Cloudflare Workers port of the same proxy (TypeScript, wrangler + vitest). Independent from the Go code: no shared sources, so routing changes usually need both sides updated.
 - `packaging/` — nFPM configs + systemd/openrc/logrotate scripts for `deb`/`rpm`/`apk`.
 - `.github/workflows/` — `release.yml` + `docker-ghcr.yml` (manual), `docs.yml` (auto).
 
@@ -26,6 +27,7 @@ cd web && npm ci && npm run build   # vue-tsc -b typecheck, then vite build -> .
 - Tests: `cd src && go test ./...` — hermetic, httptest only, no network; also needs `src/dist`
 - Frontend dev: `cd web && npm run dev` — Vite proxies `/api` to `http://127.0.0.1:5000`, so start the Go backend first
 - Docs dev: `cd docs && npm run dev`
+- Worker (Cloudflare port): `cd worker && npm ci && npm test` / `npm run typecheck` / `npm run dev`
 
 ## Routing (src/main.go)
 
