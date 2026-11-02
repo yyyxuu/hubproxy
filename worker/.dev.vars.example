@@ -23,3 +23,6 @@ MANIFEST_CACHE_TTL=3600
 # 仓库/镜像黑白名单（逗号分隔，支持通配符）
 #REPO_WHITELIST=
 #REPO_BLACKLIST=
+
+# 可选：GitHub Token（提升 api.github.com 速率上限，Web 界面的 Releases 解析会用到）
+#GITHUB_TOKEN=ghp_xxx

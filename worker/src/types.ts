@@ -7,6 +7,7 @@ export interface Env {
   REPO_BLACKLIST?: string
   TOKEN_CACHE_TTL?: string // 秒
   MANIFEST_CACHE_TTL?: string // 秒
+  GITHUB_TOKEN?: string // 可选：提升 api.github.com 速率上限（Releases 解析用）
   TOKENS: KVNamespace
   MANIFESTS: KVNamespace
 }

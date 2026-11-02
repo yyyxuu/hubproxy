@@ -1,10 +1,12 @@
-# HubProxy Cloudflare Worker 配置
+# HubProxy Cloudflare Worker 配置模板
+# 用法：复制为 wrangler.toml 后填入真实值（wrangler.toml 已被 .gitignore 忽略，不要提交）
+#   cp wrangler.example.toml wrangler.toml
 name = "hubproxy-worker"
 main = "src/index.ts"
 # Workers 平台兼容性日期
 compatibility_date = "2026-10-12"
 
-# KV 命名空间：正式部署前必须先运行
+# KV 命名空间：部署前必须先运行
 #   npx wrangler kv namespace create TOKENS
 #   npx wrangler kv namespace create MANIFESTS
 # 并把命令返回的真实 id 替换下方占位符（否则 deploy 会被 Cloudflare API 拒绝）。
@@ -38,6 +40,10 @@ MANIFEST_CACHE_TTL = "3600"
 # 仓库/镜像黑白名单（逗号分隔，支持通配符，如 "baduser/*"、*/malicious-repo）
 # REPO_WHITELIST = ""
 # REPO_BLACKLIST = ""
+
+# 可选：GitHub Token。Web 界面的 Releases 解析走 api.github.com，匿名额度按出口 IP 共享，
+# 流量大时容易触发 403 限流；配置后解析请求会以 Bearer 携带该 Token。
+# GITHUB_TOKEN = "ghp_xxx"
 
 # 自定义域名绑定（二选一）：
 # 方式 A：取消下方注释并把域名换成你自己的，wrangler deploy 时会自动在该 zone 下创建 Custom Domain
