@@ -9,6 +9,9 @@ export function copyIncomingHeaders(request: Request, headers: Headers): void {
     if (name.toLowerCase() === 'host') continue
     headers.set(name, value)
   }
+  // Workers 运行时自动解压上游 gzip 响应体却保留 Content-Encoding 头，
+  // 浏览器按该头二次解码会失败（页面空白），故统一要求上游返回未压缩内容。
+  headers.set('Accept-Encoding', 'identity')
 }
 
 /** 深拷贝响应/请求头：新建 Headers 并复制全部条目，修改副本不影响源 */

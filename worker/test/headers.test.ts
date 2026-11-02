@@ -19,6 +19,15 @@ describe('copyIncomingHeaders', () => {
     expect(headers.get('User-Agent')).toBe('docker/24')
   })
 
+  it('Accept-Encoding 固定为 identity（避免运行时解压后仍带 Content-Encoding 头）', () => {
+    const request = new Request('https://example.com/file.md', {
+      headers: { 'Accept-Encoding': 'gzip, deflate, br, zstd' },
+    })
+    const headers = new Headers()
+    copyIncomingHeaders(request, headers)
+    expect(headers.get('Accept-Encoding')).toBe('identity')
+  })
+
   it('不拷贝 Host 头', () => {
     const request = new Request('https://example.com/v2/', {
       headers: { Host: 'registry-1.docker.io', Accept: '*/*' },
